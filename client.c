@@ -42,9 +42,8 @@ int main(int argc, char **argv) {
     }
 
     //get the initial message from server
-    serverMessages = getSocketMessages(sockfd, sentence);
-    printSocketMessages(serverMessages);
-    freeStringList(serverMessages);
+    getSocketMessages(sockfd, sentence);
+    printf(sentence);
 
 
     //loop to get command from user
@@ -54,6 +53,7 @@ int main(int argc, char **argv) {
         sentence[len] = '\n';
         sentence[len + 1] = '\0';
 
+        //send messages
         p = 0;
         while (p < len) {
             int n = write(sockfd, sentence + p, len + 1 - p);
@@ -65,9 +65,9 @@ int main(int argc, char **argv) {
             }
         }
 
-        serverMessages = getSocketMessages(sockfd, sentence);
-        printSocketMessages(serverMessages);
-        freeStringList(serverMessages);
+        //get messages
+        getSocketMessages(sockfd, sentence);
+        printf(sentence);
     }
 
 

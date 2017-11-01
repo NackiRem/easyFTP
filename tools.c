@@ -1,6 +1,6 @@
 #include "tools.h"
 
-char** getSocketMessages(int sockfd, char* buff){
+void getSocketMessages(int sockfd, char* buff){
 
     //get message from server
     int p = 0;
@@ -8,43 +8,23 @@ char** getSocketMessages(int sockfd, char* buff){
         int n = read(sockfd, buff+p, 8191-p);
         if (n < 0){
             printf("Error read(): %s(%d)\n", strerror(errno), errno);
-            return 1;
+            return ;
         } else if (n == 0){
             break;
         } else {
             p += n;
-            break;
+            if (buff[p-1] == '\n')
+                break;
         }
     }
-
-    if (p == 0){
-        return NULL;
-    }
-
-    //divide message into lines
-    char** messages;
-    int len = p;
-    int temp_begin = 0, temp_end = 0;
-    for (int i = 0; i < len; i++){
-        if (buff[i] == '\n'){
-            temp_end = i;
-            char* aMessage = (char*)malloc(temp_end-temp_begin+2);
-            for (int j = 0; j < (temp_end-temp_begin+1); j++)
-                aMessage[j] = buff[temp_begin+j];
-            aMessage[(temp_end-temp_begin+1)] = '\0';
-            stringListAppend(&messages, aMessage);
-            temp_begin = i+1;
-        }
-    }
-
-    return messages;
+    buff[p] = '\0';
 }
 
 void sendSocketMessages(int sockfd, char* message){
     int len = strlen(message);
     int p = 0;
     while (p < len){
-        int n = write(sockfd, message+p, len+1-p);
+        int n = write(sockfd, message+p, len-p);
         if (n < 0){
             printf("Error write(): %s(%d)\n", strerror(errno), errno);
             return ;
@@ -52,12 +32,6 @@ void sendSocketMessages(int sockfd, char* message){
             p += n;
         }
     }
-}
-
-void printSocketMessages(char** messages){
-    int len = sizeof(messages) / sizeof(messages[0]);
-    for (int i = 0; i < len; i++)
-        printf(messages[i]);
 }
 
 void stringListAppend(char*** target, char* source){
@@ -86,44 +60,80 @@ void freeStringList(char** tofree){
     free(tofree);
 }
 
-int parseMessages(int sockfd, char** messages, bool* isLogIn){
-    if (messages == NULL)
+int parseMessages(int sockfd, char* command, bool* isLogIn, bool* isPassed){
+    if (command == NULL)
         return 1;
-    int len = sizeof(messages) / sizeof(messages[0]);
-    if (len != 1) {
-        printf("Error messages from client");
-        return 1;
+    char* commandType = NULL;
+    char* commandContent = NULL;
+    int len = strlen(command);
+    int space_tag = -1;
+    for (int i = 0; i < len; i++){
+        if (command[i] == ' ')
+            space_tag = i;
     }
-    char* command = messages[0];
-    len = strlen(command);
-    if (len < 4){
-        //send error message to client
-        ERROR(sockfd, 500);
+    if (space_tag == -1){
+        if (strlen(command) > 10){
+            ERROR(sockfd, 500);
+            return 1;
+        } else {
+            commandType = command;
+            for (int i = 0; i < len; i++){
+                if (command[i] != '\n')
+                    commandType[i] = command[i];
+                else
+                    commandType[i] = '\0';
+            }
+        }
+    } else {
+        commandType = (char*)malloc(space_tag+1);
+        for (int i = 0; i < space_tag; i++){
+            commandType[i] = command[i];
+        }
+        commandType[space_tag] = '\0';
+        if (space_tag < strlen(command)-1){
+            commandContent = (char*)malloc(len - space_tag);
+            for (int i = space_tag+1; i < len; i++){
+                if (command[i] != '\n')
+                    commandContent[(i-space_tag-1)] = command[i];
+                else
+                    commandContent[(i-space_tag-1)] = '\0';
+            }
+        }
     }
-    char temp[5];
-    for (int i = 0; i < 4; i++)
-        temp[i] = command[i];
-    temp[4] = '\0';
-    if (!strcmp(temp, "USER")){
-        USER(sockfd, command, isLogIn);
+
+
+    if (strcmp(commandType, "USER") == 0){
+        USER(sockfd, commandContent, isLogIn);
+        return 0;
     }
     if (*isLogIn == false){
         ERROR(sockfd, 332);
         return 1;
     }
-    if (!strcmp(temp, "PASS")){
-        PASS(sockfd, command);
-    } else if (!strcmp(temp, "SYST")){
-        SYST(sockfd);
-    } else if (!strcmp(temp, "TYPE")){
-        TYPE(sockfd, command);
-    } else if (!strcmp(temp, "QUIT")){
-        QUIT(sockfd, isLogIn);
+    if (strcmp(commandType, "PASS") == 0){
+        PASS(sockfd, commandContent, isLogIn, isPassed);
+        return 0;
+    }
+    if (*isPassed == false){
+        ERROR(sockfd, 331);
+        return 1;
+    }
+    if (strcmp(commandType, "SYST") == 0){
+        SYST(sockfd, commandContent);
+    } else if (strcmp(commandType, "TYPE") == 0){
+        TYPE(sockfd, commandContent);
+    } else if (strcmp(commandType, "QUIT") == 0){
+        QUIT(sockfd, commandContent, isLogIn, isPassed);
+    } else {
+        ERROR(sockfd, 500);
     }
 }
 
 void ERROR(int sockfd, int errorCode){
     switch (errorCode){
+        case 331:
+            sendSocketMessages(sockfd, "331 Password Not Input!\r\n");
+            break;
         case 332:
             sendSocketMessages(sockfd, "332 Not Log In!\r\n");
             break;
@@ -138,14 +148,12 @@ void ERROR(int sockfd, int errorCode){
     }
 }
 
-void USER(int sockfd, char* command, bool* isLogIn){
-    int len = strlen(command);
-    if (len <= 5 || command[4] != ' '){
+void USER(int sockfd, char* cmdContent, bool* isLogIn){
+    if (cmdContent == NULL){
         ERROR(sockfd, 501);
         return;
     }
-    char *content = &(command[5]);
-    if (strcmp(content, "anonymous")){
+    if (strcmp(cmdContent, "anonymous") == 0){
         *isLogIn = true;
         sendSocketMessages(sockfd, "331 Guest login ok, send your complete e-mail address as password.\r\n");
     } else {
@@ -153,30 +161,41 @@ void USER(int sockfd, char* command, bool* isLogIn){
     }
 }
 
-void PASS(int sockfd, char* command){
-    int len = strlen(command);
-    if (len <= 5 || command[4] != ' '){
+void PASS(int sockfd, char* cmdContent, bool* isLogIn, bool* isPassed){
+    if (strlen(cmdContent) > 0) {
+        sendSocketMessages(sockfd, "230-Welcome to School of Software\r\n230 Guest login ok.\r\n");
+        *isPassed = true;
+    }
+    else
+        ERROR(sockfd, 501);
+
+}
+
+void SYST(int sockfd, char* cmdContent){
+    if (cmdContent == NULL)
+        sendSocketMessages(sockfd, "215 UNIX Type: L8\r\n");
+    else
+        ERROR(sockfd, 501);
+}
+
+void TYPE(int sockfd, char* cmdContent){
+    if (cmdContent == NULL){
         ERROR(sockfd, 501);
         return;
     }
-    sendSocketMessages(sockfd, "230 Guest login ok.\r\n");
-}
-
-void SYST(int sockfd){
-    sendSocketMessages(sockfd, "215 UNIX Type: L8\r\n");
-}
-
-void TYPE(int sockfd, char* command){
-    int len = strlen(command);
-    if (len != 6 || command[4] != ' ' || command[5] != 'I'){
+    if (strlen(cmdContent) == 1 && cmdContent[0] == 'I')
+        sendSocketMessages(sockfd, "200 Type set to I.\r\n");
+    else
         ERROR(sockfd, 501);
-        return;
-    }
-    sendSocketMessages(sockfd, "200 Type set to I.\r\n");
 
 }
 
-void QUIT(int sockfd, bool* isLogIn){
-    *isLogIn = false;
-    sendSocketMessages(sockfd, "221 Goodbye.\r\n");
+void QUIT(int sockfd, char* cmdContent, bool* isLogIn, bool* isPassed){
+    if (cmdContent == NULL){
+        *isLogIn = false;
+        *isPassed = false;
+        sendSocketMessages(sockfd, "221 Goodbye.\r\n");
+    } else{
+        ERROR(sockfd, 501);
+    }
 }

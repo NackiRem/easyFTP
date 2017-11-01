@@ -36,14 +36,14 @@ int main(int argc, char **argv){
         }
 
         bool isLogIn = false;
+        bool isPassed = false;
         //send initial message to client
-        char initString[] = "220 Anonymous FTP server ready.\r\n";
-        write(connfd, initString, strlen(initString));
+        sendSocketMessages(connfd, "220 Anonymous FTP server ready.\r\n");
 
         //loop to handle user's command
         while(1){
-            clientMessages = getSocketMessages(connfd, sentence);
-            parseMessages(connfd, clientMessages, &isLogIn);
+            getSocketMessages(connfd, sentence);
+            parseMessages(connfd, sentence, &isLogIn, &isPassed);
         }
 
 
