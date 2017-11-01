@@ -10,9 +10,11 @@
 #include <malloc.h>
 
 int inputServerInfo(char** targetIP, int* targetPORT);
-char** getServerMessages(int sockfd, char* buff);
+char** getSocketMessages(int sockfd, char* buff);
 void printServerMessages(char** messages);
+
 void charAppend(char*** target, char* source);
+void freeStringList(char** tofree);
 
 int main(int argc, char **argv) {
     int sockfd;
@@ -53,8 +55,9 @@ int main(int argc, char **argv) {
     }
 
     //get the initial message from server
-    serverMessages = getServerMessages(sockfd, sentence);
+    serverMessages = getSocketMessages(sockfd, sentence);
     printServerMessages(serverMessages);
+    freeStringList(serverMessages);
 
 
     //loop to get command from user
@@ -75,13 +78,9 @@ int main(int argc, char **argv) {
             }
         }
 
-        getServerMessages(sockfd, sentence);
-
-
-
-
-
-        break;
+        serverMessages = getSocketMessages(sockfd, sentence);
+        printServerMessages(serverMessages);
+        freeStringList(serverMessages);
     }
 
 
@@ -109,7 +108,7 @@ int inputServerInfo(char** targetIP, int* targetPORT){
     return 0;
 }
 
-char** getServerMessages(int sockfd, char* buff){
+char** getSocketMessages(int sockfd, char* buff){
 
     //get message from server
     int p = 0;
@@ -168,4 +167,14 @@ void charAppend(char*** target, char* source){
         (*target)[len] = source;
         free(temp);
     }
+}
+
+void freeStringList(char** tofree){
+    if (tofree == NULL)
+        return;
+    int len = sizeof(tofree) / sizeof(tofree[0]);
+    for (int i = 0; i < len; i++){
+        free(tofree[i]);
+    }
+    free(tofree);
 }
