@@ -11,6 +11,7 @@
 
 int inputServerInfo(char** targetIP, int* targetPORT);
 char** getServerMessages(int sockfd, char* buff);
+void printServerMessages(char** messages);
 void charAppend(char*** target, char* source);
 
 int main(int argc, char **argv) {
@@ -53,6 +54,7 @@ int main(int argc, char **argv) {
 
     //get the initial message from server
     serverMessages = getServerMessages(sockfd, sentence);
+    printServerMessages(serverMessages);
 
 
     //loop to get command from user
@@ -143,8 +145,11 @@ char** getServerMessages(int sockfd, char* buff){
     }
 
     return messages;
+}
 
-    len = sizeof(messages)/ sizeof(messages[0]);
+
+void printServerMessages(char** messages){
+    int len = sizeof(messages) / sizeof(messages[0]);
     for (int i = 0; i < len; i++)
         printf(messages[i]);
 }
