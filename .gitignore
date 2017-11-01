@@ -1,0 +1,6 @@
+/cmake-build-debug/
+/CMakeLists.txt
+/temp_client.c
+/temp_server.c
+/.idea/
+
