@@ -6,7 +6,6 @@ int main(int argc, char **argv){
     char sentence[8192];
     int p;
     int len;
-    char **clientMessages = NULL;
 
     if ((listenfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         printf("Error socket(): %s(%d)\n", strerror(errno), errno);

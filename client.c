@@ -12,7 +12,6 @@ int main(int argc, char **argv) {
     char *targetIP = NULL;
     char debugIP[] = "127.0.0.1";
     int targetPort = 6789;
-    char** serverMessages = NULL;
 
     if ((sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         printf("Error socket(): %s(%d)\n", strerror(errno), errno);

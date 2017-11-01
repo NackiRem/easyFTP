@@ -34,32 +34,6 @@ void sendSocketMessages(int sockfd, char* message){
     }
 }
 
-void stringListAppend(char*** target, char* source){
-    if (*target == NULL){
-        *target = (char**)malloc(sizeof(char*));
-        *target[0] = source;
-    } else {
-        char **temp = *target;
-        int len = sizeof(*target)/sizeof((*target)[0]);
-        *target = (char**)malloc(sizeof(char*)*(len+1));
-        for (int i = 0; i < len; i++){
-            (*target)[i] = temp[i];
-        }
-        (*target)[len] = source;
-        free(temp);
-    }
-}
-
-void freeStringList(char** tofree){
-    if (tofree == NULL)
-        return;
-    int len = sizeof(tofree) / sizeof(tofree[0]);
-    for (int i = 0; i < len; i++){
-        free(tofree[i]);
-    }
-    free(tofree);
-}
-
 int parseMessages(int sockfd, char* command, bool* isLogIn, bool* isPassed){
     if (command == NULL)
         return 1;

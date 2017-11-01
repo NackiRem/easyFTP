@@ -15,10 +15,6 @@ void getSocketMessages(int sockfd, char* buff);
 
 void sendSocketMessages(int sockfd, char* message);
 
-void stringListAppend(char*** target, char* source);
-
-void freeStringList(char** tofree);
-
 int parseMessages(int sockfd, char* messages, bool* isLogIn, bool* isPassed);
 
 void ERROR(int sockfd, int errorCode);
