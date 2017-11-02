@@ -3,7 +3,7 @@
 int main(int argc, char **argv){
     int listenfd;
     struct sockaddr_in addr;
-    char sentence[8192];
+    char sentence[BUFFSIZE];
     int p;
     int len;
     int dataIpAndPort[6];

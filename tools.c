@@ -20,14 +20,14 @@ void getSocketMessages(int sockfd, char* buff){
     buff[p] = '\0';
 }
 
-void sendSocketMessages(int sockfd, char* message){
+int sendSocketMessages(int sockfd, char* message){
     int len = strlen(message);
     int p = 0;
     while (p < len){
         int n = write(sockfd, message+p, len-p);
         if (n < 0){
             printf("Error write(): %s(%d)\n", strerror(errno), errno);
-            return ;
+            return -1;
         } else {
             p += n;
         }
@@ -122,6 +122,12 @@ void ERROR(connection* connt, int errorCode){
         case 425:
             sendSocketMessages(connt->cmdfd, "425 no TCP connection was established\r\n");
             break;
+        case 426:
+            sendSocketMessages(connt->cmdfd, "426 TCP connection was broken by the client or by network failure\r\n");
+            break;
+        case 451:
+            sendSocketMessages(connt->cmdfd, "451 Can not read file from disk.\r\n");
+            break;
         case 500:
             sendSocketMessages(connt->cmdfd, "500 Command not Found!\r\n");
             break;
@@ -212,7 +218,7 @@ void PASV(connection* connt, char* cmdContent){
     connt->dataMode = 2;
 
     //open a socket and listen on it
-    if ((connt->datafd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+    if ((connt->filefd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         printf("Error socket(): %s(%d)\n", strerror(errno), errno);
         return ;
     }
@@ -220,10 +226,10 @@ void PASV(connection* connt, char* cmdContent){
     connt->data_addr.sin_family = AF_INET;
     connt->data_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     for (connt->data_addr.sin_port = 20000; connt->data_addr.sin_port < 65536; connt->data_addr.sin_port++){
-        if (bind(connt->datafd, (struct sockaddr*)&(connt->data_addr), sizeof(connt->data_addr)) != -1)
+        if (bind(connt->filefd, (struct sockaddr*)&(connt->data_addr), sizeof(connt->data_addr)) != -1)
             break;
     }
-    listen(connt->datafd, 10);
+    listen(connt->filefd, 10);
 
     //return some messages to client
     char ip[20], message[100] = "227 Entering Passive Mode (", ipandport[50];
@@ -234,7 +240,7 @@ void PASV(connection* connt, char* cmdContent){
     pIP[5] = connt->data_addr.sin_port % 256;
     sprintf(ipandport, "%d,%d,%d,%d,%d,%d", pIP[0], pIP[1], pIP[2], pIP[3], pIP[4], pIP[5]);
     strcat(message, ipandport);
-    strcat(message, ")");
+    strcat(message, ")\r\n");
     sendSocketMessages(connt->cmdfd, message);
 }
 
@@ -247,6 +253,59 @@ void RETR(connection* connt, char* cmdContent){
         ERROR(connt, 425);
         return;
     }
+    char buff[BUFFSIZE];
+    char filename[256], response[256];
+    int file, nBytes;
+    int datafd;
+    sscanf(filename, "%s", cmdContent);
+    if ((file = open(filename, O_RDONLY)) < 0){
+        ERROR(connt, 451);
+        return;
+    }
+
+    //establish data connection
+    if (connt->dataMode == 1){ //MODE PORT
+        if ((datafd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1){
+            ERROR(connt, 425);
+            return;
+        }
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_port = connt->clientIpAndPort[4]*256 + connt->clientIpAndPort[5];
+        char clientIP[100];
+        sprintf(clientIP, "%d.%d.%d.%d", connt->clientIpAndPort[0], connt->clientIpAndPort[1],
+                connt->clientIpAndPort[2], connt->clientIpAndPort[3]);
+        inet_pton(AF_INET, clientIP, &addr.sin_addr);
+        if (connect(datafd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            ERROR(connt, 425);
+            return ;
+        }
+        sprintf(response, "50 Opening BINARY mode data connection for %s\r\n", filename);
+        sendSocketMessages(connt->cmdfd, response);
+    } else {    //MODE PASV
+        if (datafd = accept(connt->filefd, NULL, NULL) == -1){
+            ERROR(connt, 425);
+            return;
+        }
+        sprintf(response, "150 Opening BINARY mode data connection for %s\r\n", filename);
+        sendSocketMessages(connt->cmdfd, response);
+    }
+    connt->datafd = datafd;
+
+    //begin transmission
+    while ((nBytes = read(file, buff, BUFFSIZE-1)) > 0){
+        if (sendSocketMessages(connt->datafd, buff) == -1){
+            ERROR(connt, 426);
+            return;
+        }
+    }
+
+    if (nBytes < 0){
+        ERROR(connt, 426);
+    } else {
+        sendSocketMessages(connt->cmdfd, "226 Transfer complete.\r\n");
+    }
+
 }
 
 void STOR(connection* connt, char* cmdContent){
