@@ -10,21 +10,37 @@
 #include <stdbool.h>
 #include <malloc.h>
 
+typedef struct connection{
+    int     sockfd;
+    bool    isLogIn;
+    bool    isPassed;
+    int     dataMode;   //0-empty   1-port  2-pasv
+    int     ipAndPort[6];
+}connection;
+
 //read messages from sockfd, return a stringlist
 void getSocketMessages(int sockfd, char* buff);
 
 void sendSocketMessages(int sockfd, char* message);
 
-int parseMessages(int sockfd, char* messages, bool* isLogIn, bool* isPassed);
+int parseMessages(connection* connt, char* messages);
 
-void ERROR(int sockfd, int errorCode);
+void ERROR(connection* connt, int errorCode);
 
-void USER(int sockfd, char* cmdContent, bool* isLogIn);
+void USER(connection* connt, char* cmdContent);
 
-void PASS(int sockfd, char* cmdContent, bool* isLogIn, bool* isPassed);
+void PASS(connection* connt, char* cmdContent);
 
-void SYST(int sockfd, char* cmdContent);
+void SYST(connection* connt, char* cmdContent);
 
-void TYPE(int sockfd, char* cmdContent);
+void TYPE(connection* connt, char* cmdContent);
 
-void QUIT(int sockfd, char* cmdContent, bool* isLogIn, bool* isPassed);
+void QUIT(connection* connt, char* cmdContent);
+
+void PORT(connection* connt, char* cmdContent);
+
+void PASV(connection* connt, char* cmdContent);
+
+void RETR(connection* connt, char* cmdContent);
+
+void STOR(connection* connt, char* cmdContent);

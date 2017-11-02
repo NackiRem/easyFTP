@@ -1,11 +1,12 @@
 #include "tools.h"
 
 int main(int argc, char **argv){
-    int listenfd, connfd;
+    int listenfd;
     struct sockaddr_in addr;
     char sentence[8192];
     int p;
     int len;
+    int dataIpAndPort[6];
 
     if ((listenfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         printf("Error socket(): %s(%d)\n", strerror(errno), errno);
@@ -29,24 +30,28 @@ int main(int argc, char **argv){
 
     //loop to handle connect request
     while (1) {
-        if ((connfd = accept(listenfd, NULL, NULL)) == -1) {
+
+        connection connt;
+        connt.dataMode = 0;
+        connt.isLogIn = false;
+        connt.isPassed = false;
+
+        if ((connt.sockfd = accept(listenfd, NULL, NULL)) == -1){
             printf("Error accept(): %s(%d)\n", strerror(errno), errno);
             continue;
         }
 
-        bool isLogIn = false;
-        bool isPassed = false;
         //send initial message to client
-        sendSocketMessages(connfd, "220 Anonymous FTP server ready.\r\n");
+        sendSocketMessages(connt.sockfd, "220 Anonymous FTP server ready.\r\n");
 
         //loop to handle user's command
         while(1){
-            getSocketMessages(connfd, sentence);
-            parseMessages(connfd, sentence, &isLogIn, &isPassed);
+            getSocketMessages(connt.sockfd, sentence);
+            parseMessages(&connt, sentence);
         }
 
 
-        close(connfd);
+        close(connt.sockfd);
     }
 
     close(listenfd);

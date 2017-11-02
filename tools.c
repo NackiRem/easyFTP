@@ -34,7 +34,7 @@ void sendSocketMessages(int sockfd, char* message){
     }
 }
 
-int parseMessages(int sockfd, char* command, bool* isLogIn, bool* isPassed){
+int parseMessages(connection* connt, char* command){
     if (command == NULL)
         return 1;
     char* commandType = NULL;
@@ -47,7 +47,7 @@ int parseMessages(int sockfd, char* command, bool* isLogIn, bool* isPassed){
     }
     if (space_tag == -1){
         if (strlen(command) > 10){
-            ERROR(sockfd, 500);
+            ERROR(connt, 500);
             return 1;
         } else {
             commandType = command;
@@ -77,99 +77,134 @@ int parseMessages(int sockfd, char* command, bool* isLogIn, bool* isPassed){
 
 
     if (strcmp(commandType, "USER") == 0){
-        USER(sockfd, commandContent, isLogIn);
+        USER(connt, commandContent);
         return 0;
     }
-    if (*isLogIn == false){
-        ERROR(sockfd, 332);
+    if (connt->isLogIn == false){
+        ERROR(connt, 332);
         return 1;
     }
     if (strcmp(commandType, "PASS") == 0){
-        PASS(sockfd, commandContent, isLogIn, isPassed);
+        PASS(connt, commandContent);
         return 0;
     }
-    if (*isPassed == false){
-        ERROR(sockfd, 331);
+    if (connt->isPassed == false){
+        ERROR(connt, 331);
         return 1;
     }
     if (strcmp(commandType, "SYST") == 0){
-        SYST(sockfd, commandContent);
+        SYST(connt, commandContent);
     } else if (strcmp(commandType, "TYPE") == 0){
-        TYPE(sockfd, commandContent);
+        TYPE(connt, commandContent);
     } else if (strcmp(commandType, "QUIT") == 0){
-        QUIT(sockfd, commandContent, isLogIn, isPassed);
+        QUIT(connt, commandContent);
+    } else if (strcmp(commandType, "PORT") == 0){
+        PORT(connt, commandContent);
+    } else if (strcmp(commandType, "PASV") == 0){
+        PASV(connt, commandContent);
+    } else if (strcmp(commandType, "RETR") == 0){
+        RETR(connt, commandContent);
+    } else if (strcmp(commandType, "STOR") == 0){
+        STOR(connt, commandContent);
     } else {
-        ERROR(sockfd, 500);
+        ERROR(connt, 500);
     }
 }
 
-void ERROR(int sockfd, int errorCode){
+void ERROR(connection* connt, int errorCode){
     switch (errorCode){
         case 331:
-            sendSocketMessages(sockfd, "331 Password Not Input!\r\n");
+            sendSocketMessages(connt->sockfd, "331 Password Not Input!\r\n");
             break;
         case 332:
-            sendSocketMessages(sockfd, "332 Not Log In!\r\n");
+            sendSocketMessages(connt->sockfd, "332 Not Log In!\r\n");
             break;
         case 500:
-            sendSocketMessages(sockfd, "500 Command not Found!\r\n");
+            sendSocketMessages(connt->sockfd, "500 Command not Found!\r\n");
             break;
         case 501:
-            sendSocketMessages(sockfd, "501 Syntax Error in parameters!\r\n");
+            sendSocketMessages(connt->sockfd, "501 Syntax Error in parameters!\r\n");
             break;
         default:
             break;
     }
 }
 
-void USER(int sockfd, char* cmdContent, bool* isLogIn){
+void USER(connection* connt, char* cmdContent){
     if (cmdContent == NULL){
-        ERROR(sockfd, 501);
+        ERROR(connt, 501);
         return;
     }
     if (strcmp(cmdContent, "anonymous") == 0){
-        *isLogIn = true;
-        sendSocketMessages(sockfd, "331 Guest login ok, send your complete e-mail address as password.\r\n");
+        connt->isLogIn = true;
+        sendSocketMessages(connt->sockfd, "331 Guest login ok, send your complete e-mail address as password.\r\n");
     } else {
-        ERROR(sockfd, 501);
+        ERROR(connt, 501);
     }
 }
 
-void PASS(int sockfd, char* cmdContent, bool* isLogIn, bool* isPassed){
+void PASS(connection* connt, char* cmdContent){
     if (strlen(cmdContent) > 0) {
-        sendSocketMessages(sockfd, "230-Welcome to School of Software\r\n230 Guest login ok.\r\n");
-        *isPassed = true;
+        sendSocketMessages(connt->sockfd, "230-Welcome to School of Software\r\n230 Guest login ok.\r\n");
+        connt->isPassed = true;
     }
     else
-        ERROR(sockfd, 501);
+        ERROR(connt, 501);
 
 }
 
-void SYST(int sockfd, char* cmdContent){
+void SYST(connection* connt, char* cmdContent){
     if (cmdContent == NULL)
-        sendSocketMessages(sockfd, "215 UNIX Type: L8\r\n");
+        sendSocketMessages(connt->sockfd, "215 UNIX Type: L8\r\n");
     else
-        ERROR(sockfd, 501);
+        ERROR(connt, 501);
 }
 
-void TYPE(int sockfd, char* cmdContent){
+void TYPE(connection* connt, char* cmdContent){
     if (cmdContent == NULL){
-        ERROR(sockfd, 501);
+        ERROR(connt, 501);
         return;
     }
     if (strlen(cmdContent) == 1 && cmdContent[0] == 'I')
-        sendSocketMessages(sockfd, "200 Type set to I.\r\n");
+        sendSocketMessages(connt->sockfd, "200 Type set to I.\r\n");
     else
-        ERROR(sockfd, 501);
+        ERROR(connt, 501);
 
 }
 
-void QUIT(int sockfd, char* cmdContent, bool* isLogIn, bool* isPassed){
+void QUIT(connection* connt, char* cmdContent){
     if (cmdContent == NULL){
-        *isLogIn = false;
-        *isPassed = false;
-        sendSocketMessages(sockfd, "221 Goodbye.\r\n");
+        connt->isLogIn = false;
+        connt->isPassed = false;
+        sendSocketMessages(connt->sockfd, "221 Goodbye.\r\n");
     } else{
-        ERROR(sockfd, 501);
+        ERROR(connt, 501);
     }
+}
+
+void PORT(connection* connt, char* cmdContent){
+    int *ip = connt->ipAndPort;
+    if (sscanf(cmdContent, "%d,%d,%d,%d,%d,%d", ip, ip+1, ip+2, ip+3, ip+4, ip+5) != 6){
+        ERROR(connt, 501);
+        return;
+    }
+    for (int i = 0; i < 6; i++){
+        if (ip[i] < 0 || ip[i] > 255){
+            ERROR(connt, 501);
+            return;
+        }
+    }
+    sendSocketMessages(connt->sockfd, "200 PORT command successful.\r\n");
+}
+
+void PASV(connection* connt, char* cmdContent){
+
+}
+
+void RETR(connection* connt, char* cmdContent){
+
+}
+
+void STOR(connection* connt, char* cmdContent){
+
 }
