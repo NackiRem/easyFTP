@@ -36,22 +36,22 @@ int main(int argc, char **argv){
         connt.isLogIn = false;
         connt.isPassed = false;
 
-        if ((connt.sockfd = accept(listenfd, NULL, NULL)) == -1){
+        if ((connt.cmdfd = accept(listenfd, NULL, NULL)) == -1){
             printf("Error accept(): %s(%d)\n", strerror(errno), errno);
             continue;
         }
 
         //send initial message to client
-        sendSocketMessages(connt.sockfd, "220 Anonymous FTP server ready.\r\n");
+        sendSocketMessages(connt.cmdfd, "220 Anonymous FTP server ready.\r\n");
 
         //loop to handle user's command
         while(1){
-            getSocketMessages(connt.sockfd, sentence);
+            getSocketMessages(connt.cmdfd, sentence);
             parseMessages(&connt, sentence);
         }
 
 
-        close(connt.sockfd);
+        close(connt.cmdfd);
     }
 
     close(listenfd);

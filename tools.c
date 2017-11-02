@@ -114,16 +114,19 @@ int parseMessages(connection* connt, char* command){
 void ERROR(connection* connt, int errorCode){
     switch (errorCode){
         case 331:
-            sendSocketMessages(connt->sockfd, "331 Password Not Input!\r\n");
+            sendSocketMessages(connt->cmdfd, "331 Password Not Input!\r\n");
             break;
         case 332:
-            sendSocketMessages(connt->sockfd, "332 Not Log In!\r\n");
+            sendSocketMessages(connt->cmdfd, "332 Not Log In!\r\n");
+            break;
+        case 425:
+            sendSocketMessages(connt->cmdfd, "425 no TCP connection was established\r\n");
             break;
         case 500:
-            sendSocketMessages(connt->sockfd, "500 Command not Found!\r\n");
+            sendSocketMessages(connt->cmdfd, "500 Command not Found!\r\n");
             break;
         case 501:
-            sendSocketMessages(connt->sockfd, "501 Syntax Error in parameters!\r\n");
+            sendSocketMessages(connt->cmdfd, "501 Syntax Error in parameters!\r\n");
             break;
         default:
             break;
@@ -137,7 +140,7 @@ void USER(connection* connt, char* cmdContent){
     }
     if (strcmp(cmdContent, "anonymous") == 0){
         connt->isLogIn = true;
-        sendSocketMessages(connt->sockfd, "331 Guest login ok, send your complete e-mail address as password.\r\n");
+        sendSocketMessages(connt->cmdfd, "331 Guest login ok, send your complete e-mail address as password.\r\n");
     } else {
         ERROR(connt, 501);
     }
@@ -145,7 +148,7 @@ void USER(connection* connt, char* cmdContent){
 
 void PASS(connection* connt, char* cmdContent){
     if (strlen(cmdContent) > 0) {
-        sendSocketMessages(connt->sockfd, "230-Welcome to School of Software\r\n230 Guest login ok.\r\n");
+        sendSocketMessages(connt->cmdfd, "230-Welcome to School of Software\r\n230 Guest login ok.\r\n");
         connt->isPassed = true;
     }
     else
@@ -155,7 +158,7 @@ void PASS(connection* connt, char* cmdContent){
 
 void SYST(connection* connt, char* cmdContent){
     if (cmdContent == NULL)
-        sendSocketMessages(connt->sockfd, "215 UNIX Type: L8\r\n");
+        sendSocketMessages(connt->cmdfd, "215 UNIX Type: L8\r\n");
     else
         ERROR(connt, 501);
 }
@@ -166,7 +169,7 @@ void TYPE(connection* connt, char* cmdContent){
         return;
     }
     if (strlen(cmdContent) == 1 && cmdContent[0] == 'I')
-        sendSocketMessages(connt->sockfd, "200 Type set to I.\r\n");
+        sendSocketMessages(connt->cmdfd, "200 Type set to I.\r\n");
     else
         ERROR(connt, 501);
 
@@ -176,14 +179,14 @@ void QUIT(connection* connt, char* cmdContent){
     if (cmdContent == NULL){
         connt->isLogIn = false;
         connt->isPassed = false;
-        sendSocketMessages(connt->sockfd, "221 Goodbye.\r\n");
+        sendSocketMessages(connt->cmdfd, "221 Goodbye.\r\n");
     } else{
         ERROR(connt, 501);
     }
 }
 
 void PORT(connection* connt, char* cmdContent){
-    int *ip = connt->ipAndPort;
+    int *ip = connt->clientIpAndPort;
     if (sscanf(cmdContent, "%d,%d,%d,%d,%d,%d", ip, ip+1, ip+2, ip+3, ip+4, ip+5) != 6){
         ERROR(connt, 501);
         return;
@@ -194,17 +197,66 @@ void PORT(connection* connt, char* cmdContent){
             return;
         }
     }
-    sendSocketMessages(connt->sockfd, "200 PORT command successful.\r\n");
+    connt->dataMode = 1;
+    sendSocketMessages(connt->cmdfd, "200 PORT command successful.\r\n");
+    if (connt->dataMode != 0){
+        close(connt->datafd);
+    }
 }
 
 void PASV(connection* connt, char* cmdContent){
+    if (cmdContent != NULL){
+        ERROR(connt, 501);
+        return;
+    }
+    connt->dataMode = 2;
 
+    //open a socket and listen on it
+    if ((connt->datafd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+        printf("Error socket(): %s(%d)\n", strerror(errno), errno);
+        return ;
+    }
+    memset(&(connt->data_addr), 0, sizeof(connt->data_addr));
+    connt->data_addr.sin_family = AF_INET;
+    connt->data_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    for (connt->data_addr.sin_port = 20000; connt->data_addr.sin_port < 65536; connt->data_addr.sin_port++){
+        if (bind(connt->datafd, (struct sockaddr*)&(connt->data_addr), sizeof(connt->data_addr)) != -1)
+            break;
+    }
+    listen(connt->datafd, 10);
+
+    //return some messages to client
+    char ip[20], message[100] = "227 Entering Passive Mode (", ipandport[50];
+    int *pIP = connt->serverIpAndPort;
+    getIP(ip);
+    sscanf(ip, "%d.%d.%d.%d", pIP, pIP+1, pIP+2, pIP+3);
+    pIP[4] = connt->data_addr.sin_port / 256;
+    pIP[5] = connt->data_addr.sin_port % 256;
+    sprintf(ipandport, "%d,%d,%d,%d,%d,%d", pIP[0], pIP[1], pIP[2], pIP[3], pIP[4], pIP[5]);
+    strcat(message, ipandport);
+    strcat(message, ")");
+    sendSocketMessages(connt->cmdfd, message);
 }
 
 void RETR(connection* connt, char* cmdContent){
-
+    if (cmdContent == NULL){
+        ERROR(connt, 501);
+        return;
+    }
+    if (connt->dataMode == 0){
+        ERROR(connt, 425);
+        return;
+    }
 }
 
 void STOR(connection* connt, char* cmdContent){
 
+}
+
+void getIP(char* ip){
+    system("ifconfig | grep inet[^6] | awk \'{if(NR == 2){print $2}}\' > a.txt");
+    FILE *fp1 = fopen("a.txt", "r");
+    fgets(ip, 1024, fp1);
+    fclose(fp1);
+    remove("a.txt");
 }

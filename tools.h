@@ -7,15 +7,21 @@
 #include <string.h>
 #include <memory.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <malloc.h>
 
 typedef struct connection{
-    int     sockfd;
+    int     cmdfd;
+    int     datafd;
+    struct  sockaddr_in cmd_addr;
+    struct  sockaddr_in data_addr;
     bool    isLogIn;
     bool    isPassed;
     int     dataMode;   //0-empty   1-port  2-pasv
-    int     ipAndPort[6];
+    int     clientIpAndPort[6];
+    int     serverIpAndPort[6];
+
 }connection;
 
 //read messages from sockfd, return a stringlist
@@ -44,3 +50,5 @@ void PASV(connection* connt, char* cmdContent);
 void RETR(connection* connt, char* cmdContent);
 
 void STOR(connection* connt, char* cmdContent);
+
+void getIP(char* ip);
