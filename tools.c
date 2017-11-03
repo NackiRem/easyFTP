@@ -5,7 +5,7 @@ void getSocketMessages(int sockfd, char* buff){
     //get message from server
     int p = 0;
     while(1){
-        int n = read(sockfd, buff+p, 8191-p);
+        int n = (int)read(sockfd, buff+p, (size_t)(8191-p));
         if (n < 0){
             printf("Error read(): %s(%d)\n", strerror(errno), errno);
             return ;
@@ -13,7 +13,7 @@ void getSocketMessages(int sockfd, char* buff){
             break;
         } else {
             p += n;
-            if (buff[p-1] == '\n')
+            if (buff[p-2] == '\n' || buff[p-2] == '\r')
                 break;
         }
     }
@@ -21,10 +21,10 @@ void getSocketMessages(int sockfd, char* buff){
 }
 
 int sendSocketMessages(int sockfd, char* message){
-    int len = strlen(message);
+    int len = (int)strlen(message);
     int p = 0;
     while (p < len){
-        int n = write(sockfd, message+p, len-p);
+        int n = (int)write(sockfd, message+p, (size_t)(len-p));
         if (n < 0){
             printf("Error write(): %s(%d)\n", strerror(errno), errno);
             return -1;
@@ -39,7 +39,7 @@ int parseMessages(connection* connt, char* command){
         return 1;
     char* commandType = NULL;
     char* commandContent = NULL;
-    int len = strlen(command);
+    int len = (int)strlen(command);
     int space_tag = -1;
     for (int i = 0; i < len; i++){
         if (command[i] == ' ')
@@ -59,18 +59,36 @@ int parseMessages(connection* connt, char* command){
             }
         }
     } else {
-        commandType = (char*)malloc(space_tag+1);
+        commandType = (char*)malloc((size_t)(space_tag+1));
         for (int i = 0; i < space_tag; i++){
             commandType[i] = command[i];
         }
         commandType[space_tag] = '\0';
         if (space_tag < strlen(command)-1){
-            commandContent = (char*)malloc(len - space_tag);
+            commandContent = (char*)malloc((size_t)(len - space_tag));
             for (int i = space_tag+1; i < len; i++){
                 if (command[i] != '\n')
                     commandContent[(i-space_tag-1)] = command[i];
                 else
                     commandContent[(i-space_tag-1)] = '\0';
+            }
+        }
+    }
+
+    // clear \r \n \0 in the command
+    for (int i = 0; i < strlen(commandType); i++){
+        if (commandType[i] == '\r' || commandType[i] == '\n' || commandType[i] == '\0'){
+            commandType[i] = '\0';
+            break;
+        }
+    }
+
+
+    if (commandContent != NULL){
+        for (int i = 0; i < strlen(commandContent); i++){
+            if (commandContent[i] == '\r' || commandContent[i] == '\n' || commandContent[i] == '\0'){
+                commandContent[i] = '\0';
+                break;
             }
         }
     }
@@ -98,6 +116,10 @@ int parseMessages(connection* connt, char* command){
         TYPE(connt, commandContent);
     } else if (strcmp(commandType, "QUIT") == 0){
         QUIT(connt, commandContent);
+        return -1;
+    } else if (strcmp(commandType, "ABOR") == 0){
+        ABOR(connt, commandContent);
+        return -1;
     } else if (strcmp(commandType, "PORT") == 0){
         PORT(connt, commandContent);
     } else if (strcmp(commandType, "PASV") == 0){
@@ -106,6 +128,14 @@ int parseMessages(connection* connt, char* command){
         RETR(connt, commandContent);
     } else if (strcmp(commandType, "STOR") == 0){
         STOR(connt, commandContent);
+    } else if (strcmp(commandType, "MKD") == 0){
+        MKD(connt, commandContent);
+    } else if (strcmp(commandType, "CWD") == 0){
+        CWD(connt, commandContent);
+    } else if (strcmp(commandType, "LIST") == 0){
+        LIST(connt, commandContent);
+    } else if (strcmp(commandType, "RMD") == 0){
+        RMD(connt, commandContent);
     } else {
         ERROR(connt, 500);
     }
@@ -132,7 +162,10 @@ void ERROR(connection* connt, int errorCode){
             sendSocketMessages(connt->cmdfd, "500 Command not Found!\r\n");
             break;
         case 501:
-            sendSocketMessages(connt->cmdfd, "501 Syntax Error in parameters!\r\n");
+            sendSocketMessages(connt->cmdfd, "501 Syntax Error in parameters!123\r\n");
+            break;
+        case 550:
+            sendSocketMessages(connt->cmdfd, "550 No such file or directory.\r\n");
             break;
         default:
             break;
@@ -154,7 +187,7 @@ void USER(connection* connt, char* cmdContent){
 
 void PASS(connection* connt, char* cmdContent){
     if (strlen(cmdContent) > 0) {
-        sendSocketMessages(connt->cmdfd, "230-Welcome to School of Software\r\n230 Guest login ok.\r\n");
+        sendSocketMessages(connt->cmdfd, "230 Guest login ok.\r\n");
         connt->isPassed = true;
     }
     else
@@ -162,7 +195,7 @@ void PASS(connection* connt, char* cmdContent){
 
 }
 
-void SYST(connection* connt, char* cmdContent){
+void SYST(connection* connt, const char* cmdContent){
     if (cmdContent == NULL)
         sendSocketMessages(connt->cmdfd, "215 UNIX Type: L8\r\n");
     else
@@ -181,7 +214,17 @@ void TYPE(connection* connt, char* cmdContent){
 
 }
 
-void QUIT(connection* connt, char* cmdContent){
+void QUIT(connection* connt, const char* cmdContent){
+    if (cmdContent == NULL){
+        connt->isLogIn = false;
+        connt->isPassed = false;
+        sendSocketMessages(connt->cmdfd, "221 Goodbye.\r\n");
+    } else{
+        ERROR(connt, 501);
+    }
+}
+
+void ABOR(connection* connt, const char* cmdContent){
     if (cmdContent == NULL){
         connt->isLogIn = false;
         connt->isPassed = false;
@@ -192,11 +235,12 @@ void QUIT(connection* connt, char* cmdContent){
 }
 
 void PORT(connection* connt, char* cmdContent){
-    int *ip = connt->clientIpAndPort;
-    if (sscanf(cmdContent, "%d,%d,%d,%d,%d,%d", ip, ip+1, ip+2, ip+3, ip+4, ip+5) != 6){
+    if (cmdContent == NULL){
         ERROR(connt, 501);
         return;
     }
+    int *ip = connt->clientIpAndPort;
+    sscanf(cmdContent, "%d,%d,%d,%d,%d,%d", ip, ip+1, ip+2, ip+3, ip+4, ip+5);
     for (int i = 0; i < 6; i++){
         if (ip[i] < 0 || ip[i] > 255){
             ERROR(connt, 501);
@@ -210,11 +254,12 @@ void PORT(connection* connt, char* cmdContent){
     }
 }
 
-void PASV(connection* connt, char* cmdContent){
+void PASV(connection* connt, const char* cmdContent){
     if (cmdContent != NULL){
         ERROR(connt, 501);
         return;
     }
+    int serverPORT = 0;
     connt->dataMode = 2;
 
     //open a socket and listen on it
@@ -225,9 +270,12 @@ void PASV(connection* connt, char* cmdContent){
     memset(&(connt->data_addr), 0, sizeof(connt->data_addr));
     connt->data_addr.sin_family = AF_INET;
     connt->data_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    for (connt->data_addr.sin_port = 20000; connt->data_addr.sin_port < 65536; connt->data_addr.sin_port++){
-        if (bind(connt->filefd, (struct sockaddr*)&(connt->data_addr), sizeof(connt->data_addr)) != -1)
+    for (int i = 20000; i < 65536; i++){
+        connt->data_addr.sin_port = htons((uint16_t)i);
+        if (bind(connt->filefd, (struct sockaddr*)&(connt->data_addr), sizeof(connt->data_addr)) != -1) {
+            serverPORT = i;
             break;
+        }
     }
     listen(connt->filefd, 10);
 
@@ -236,8 +284,8 @@ void PASV(connection* connt, char* cmdContent){
     int *pIP = connt->serverIpAndPort;
     getIP(ip);
     sscanf(ip, "%d.%d.%d.%d", pIP, pIP+1, pIP+2, pIP+3);
-    pIP[4] = connt->data_addr.sin_port / 256;
-    pIP[5] = connt->data_addr.sin_port % 256;
+    pIP[4] = serverPORT / 256;
+    pIP[5] = serverPORT % 256;
     sprintf(ipandport, "%d,%d,%d,%d,%d,%d", pIP[0], pIP[1], pIP[2], pIP[3], pIP[4], pIP[5]);
     strcat(message, ipandport);
     strcat(message, ")\r\n");
@@ -255,9 +303,14 @@ void RETR(connection* connt, char* cmdContent){
     }
     char buff[BUFFSIZE];
     char filename[256], response[256];
-    int file, nBytes;
+    size_t nBytes;
+    int file;
     int datafd;
-    sscanf(filename, "%s", cmdContent);
+    sprintf(filename, "%s%s%s", connt->root, connt->path, cmdContent);
+    if (access(filename, R_OK) == -1){
+        ERROR(connt, 451);
+        return;
+    }
     if ((file = open(filename, O_RDONLY)) < 0){
         ERROR(connt, 451);
         return;
@@ -270,8 +323,79 @@ void RETR(connection* connt, char* cmdContent){
             return;
         }
         struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
-        addr.sin_port = connt->clientIpAndPort[4]*256 + connt->clientIpAndPort[5];
+        addr.sin_port = htons((uint16_t)(connt->clientIpAndPort[4]*256 + connt->clientIpAndPort[5]));
+        char clientIP[100];
+        sprintf(clientIP, "%d.%d.%d.%d", connt->clientIpAndPort[0], connt->clientIpAndPort[1],
+                connt->clientIpAndPort[2], connt->clientIpAndPort[3]);
+        inet_pton(AF_INET, clientIP, &addr.sin_addr);
+        if (connect(datafd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            ERROR(connt, 425);
+            return ;
+        }
+        sprintf(response, "150 Opening BINARY mode data connection for %s\r\n", filename);
+        sendSocketMessages(connt->cmdfd, response);
+    } else {    //MODE PASV
+        if ((datafd = accept(connt->filefd, NULL, NULL)) == -1){
+            ERROR(connt, 425);
+            return;
+        }
+        sprintf(response, "150 Opening BINARY mode data connection for %s\r\n", filename);
+        sendSocketMessages(connt->cmdfd, response);
+    }
+    connt->datafd = datafd;
+
+    //begin transmission
+    while ((nBytes = (size_t)read(file, buff, BUFFSIZE-1)) > 0){
+        write(connt->datafd, buff, nBytes);
+    }
+
+    //over the transmission
+    close(file);
+    close(datafd);
+    if (connt->dataMode == 2)
+        close(connt->filefd);
+    connt->dataMode = 0;
+
+    if (nBytes == -1){
+        ERROR(connt, 426);
+    } else {
+        sendSocketMessages(connt->cmdfd, "226 Transfer complete.\r\n");
+    }
+
+}
+
+void STOR(connection* connt, char* cmdContent){
+    if (cmdContent == NULL){
+        ERROR(connt, 501);
+        return;
+    }
+    if (connt->dataMode == 0){
+        ERROR(connt, 425);
+        return;
+    }
+    char buff[BUFFSIZE];
+    char filename[256], response[256];
+    int file;
+    size_t nBytes;
+    int datafd;
+    sprintf(filename, "%s%s%s", connt->root, connt->path, cmdContent);
+    if ((file = open(filename, O_WRONLY | O_CREAT)) < 0){
+        ERROR(connt, 451);
+        return;
+    }
+
+    //establish data connection
+    if (connt->dataMode == 1){ //MODE PORT
+        if ((datafd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1){
+            ERROR(connt, 425);
+            return;
+        }
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons((uint16_t)(connt->clientIpAndPort[4]*256 + connt->clientIpAndPort[5]));
         char clientIP[100];
         sprintf(clientIP, "%d.%d.%d.%d", connt->clientIpAndPort[0], connt->clientIpAndPort[1],
                 connt->clientIpAndPort[2], connt->clientIpAndPort[3]);
@@ -283,7 +407,7 @@ void RETR(connection* connt, char* cmdContent){
         sprintf(response, "50 Opening BINARY mode data connection for %s\r\n", filename);
         sendSocketMessages(connt->cmdfd, response);
     } else {    //MODE PASV
-        if (datafd = accept(connt->filefd, NULL, NULL) == -1){
+        if ((datafd = accept(connt->filefd, NULL, NULL)) == -1){
             ERROR(connt, 425);
             return;
         }
@@ -293,23 +417,134 @@ void RETR(connection* connt, char* cmdContent){
     connt->datafd = datafd;
 
     //begin transmission
-    while ((nBytes = read(file, buff, BUFFSIZE-1)) > 0){
-        if (sendSocketMessages(connt->datafd, buff) == -1){
-            ERROR(connt, 426);
-            return;
-        }
+    while ((nBytes = (size_t)read(datafd, buff, BUFFSIZE-1)) > 0){
+        write(file, buff, nBytes);
     }
 
-    if (nBytes < 0){
+    //over the transmission
+    close(file);
+    close(datafd);
+    if (connt->dataMode == 2)
+        close(connt->filefd);
+    connt->dataMode = 0;
+
+    if (nBytes == -1){
         ERROR(connt, 426);
     } else {
         sendSocketMessages(connt->cmdfd, "226 Transfer complete.\r\n");
     }
+}
+
+void MKD(connection* connt, char* cmdContent){
+    if (cmdContent == NULL){
+        ERROR(connt, 501);
+        return;
+    }
+    if ((strstr(cmdContent, "..") != NULL)){
+        ERROR(connt, 501);
+        return;
+    }
+    char command[100] = "mkdir ";
+    char tarPath[100] = "\0";
+    strcat(tarPath, connt->path);
+    strcat(command, connt->root);
+    strcat(command, tarPath);
+    strcat(command, cmdContent);
+    if (system(command) == 0){
+        char response[100] = "250 successfully created directory.\r\n";
+        strcat(tarPath, "\r\n");
+        strcat(response, tarPath);
+        sendSocketMessages(connt->cmdfd, response);
+    } else {
+        sendSocketMessages(connt->cmdfd, "550 Failed to mkdir.\r\n");
+    }
 
 }
 
-void STOR(connection* connt, char* cmdContent){
+void CWD(connection* connt, char* cmdContent){
+    if (cmdContent == NULL){
+        ERROR(connt, 501);
+        return;
+    }
+    if ((strstr(cmdContent, "..") != NULL)){
+        ERROR(connt, 501);
+        return;
+    }
+    char command[100] = "cd ";
+    char tarPath[100] = "\0";
+    strcpy(tarPath, connt->path);
+    if (strlen(cmdContent) == 0){
+        ERROR(connt, 501);
+        return;
+    }
+    if (cmdContent[0] == '/'){
+        strcpy(tarPath, cmdContent);
+    } else {
+        strcat(tarPath, cmdContent);
+    }
+    if (tarPath[(strlen(tarPath)-1)] != '/')
+        strcat(tarPath, "/");
 
+    strcat(command, connt->root);
+    strcat(command, tarPath);
+
+    if (system(command) != 0){
+        ERROR(connt, 550);
+    } else {
+        char response[100] = "250 okay.\r\n";
+        strcat(response, tarPath);
+        strcat(response, "\r\n");
+        sendSocketMessages(connt->cmdfd, response);
+    }
+}
+
+void LIST(connection* connt, char* cmdContent){
+    if (cmdContent != NULL){
+        ERROR(connt, 501);
+        return;
+    }
+    if ((strstr(cmdContent, "..") != NULL)){
+        ERROR(connt, 501);
+        return;
+    }
+    char command[100] = "ls ";
+
+}
+
+void RMD(connection* connt, char* cmdContent){
+    if (cmdContent == NULL){
+        ERROR(connt, 501);
+        return;
+    }
+    if ((strstr(cmdContent, "..") != NULL)){
+        ERROR(connt, 501);
+        return;
+    }
+    char command[100] = "rm -rf ";
+    char tarPath[100] = "\0";
+
+    strcat(tarPath, connt->path);
+
+    if (strlen(cmdContent) == 0){
+        ERROR(connt, 501);
+        return;
+    }
+    if (cmdContent[0] == '/'){
+        ERROR(connt, 501);
+    } else {
+        strcat(tarPath, cmdContent);
+    }
+
+    strcat(command, connt->root);
+    strcat(command, tarPath);
+    if (system(command) == 0){
+        char response[100] = "250 okay.\r\n";
+        strcat(tarPath, "\r\n");
+        strcat(response, tarPath);
+        sendSocketMessages(connt->cmdfd, response);
+    } else {
+        sendSocketMessages(connt->cmdfd, "550 Failed to mkdir.\r\n");
+    }
 }
 
 void getIP(char* ip){
@@ -318,4 +553,24 @@ void getIP(char* ip){
     fgets(ip, 1024, fp1);
     fclose(fp1);
     remove("a.txt");
+}
+
+void parse_input(int argc, char **argv, int* listening_port, char* working_dir){
+    struct option long_options[] = {
+            {"root", required_argument, NULL, 'r'},
+            {"port", required_argument, NULL, 'p'},
+            {NULL, 0, NULL, 0}
+    };
+    while (1){
+        switch (getopt_long_only(argc, argv, "r:p:", long_options, NULL)){
+            case 'r':
+                strcpy(working_dir, optarg);
+                break;
+            case 'p':
+                *listening_port = atoi(optarg);
+                break;
+            default:
+                return;
+        }
+    }
 }

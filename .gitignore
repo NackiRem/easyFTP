@@ -3,4 +3,5 @@
 /temp_client.c
 /temp_server.c
 /.idea/
-
+/autograde.py
+/makefile
