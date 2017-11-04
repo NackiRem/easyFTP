@@ -1,5 +1,7 @@
-
 #include "tools.h"
+#define     BUFFSIZE    8192
+
+
 typedef struct serverManager{
     int     tranMode;   //0-empty   1-port  2-pasv
     int     cmdfd;
@@ -12,58 +14,52 @@ typedef struct serverManager{
 }serverManager;
 
 
-int inputServerInfo(char** targetIP, int* targetPORT);
+void initClient(serverManager* server);
+int connectServer(serverManager* server);
+void loginServer(serverManager* server);
+
 void parseCmd(char* cmd, char* cmdType, char* cmdContent);
-void HandlePORT(serverManager* server, char* cmdContent);
-void HandlePASV(serverManager* server, char* cmdContent, char* buff);
+void HandleCommand(serverManager* server);
+int HandleUSER(serverManager* server);
+int HandlePASS(serverManager* server, char* password);
+int HandlePORT(serverManager* server, char* cmdContent);
+void HandlePASV(serverManager* server, char* cmdContent);
 void HandleRETR(serverManager* server, char* cmdContent);
 void HandleSTOR(serverManager* server, char* cmdContent);
+
+void clearCharNorR(char* tarString);
+void getClientIPandPORT(int* ip, int *port);
+
 
 int main(int argc, char **argv) {
     serverManager  server;
     server.tranMode = 0;
 
-    struct sockaddr_in addr;
     char sentence[8192];
     int len;
     int p;
-    char *targetIP = NULL;
-    char debugIP[] = "127.0.0.1";
-    int targetPort = 6789;
 
-    if ((server.cmdfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
-        printf("Error socket(): %s(%d)\n", strerror(errno), errno);
-        return 1;
+    initClient(&server);
+
+    if (connectServer(&server) == -1){
+        printf("Connection refused.\n");
+        return -1;
     }
 
-    //get target info
-//    if (inputServerInfo(&targetIP, &targetPort)){
-//        printf("Failed to getServerInfo!");
-//        return 1;
-//    }
-    targetIP = debugIP;
-
-
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)targetPort);
-    if (inet_pton(AF_INET, targetIP, &addr.sin_addr) <= 0) {
-        printf("Error inet_pton(): %s(%d)\n", strerror(errno), errno);
-        return 1;
-    }
-//    free(targetIP);
-
-    if (connect(server.cmdfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        printf("Error connect(): %s(%d)\n", strerror(errno), errno);
-        return 1;
-    }
+    loginServer(&server);
 
     //get the initial message from server
     getSocketMessages(server.cmdfd, sentence);
-    printf(sentence);
+    if (strstr(sentence, "220") != 0){
+        printf("Connection refused.\n");
+        return -1;
+    } else {
+        printf("Anonymous FTP server ready.\n");
+    }
 
+    //Handle User's Command
+    HandleCommand(&server);
 
-    //loop to get command from user
     while(1){
         fgets(sentence, 4096, stdin);
         len = (int)strlen(sentence);
@@ -104,25 +100,124 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-int inputServerInfo(char** targetIP, int* targetPORT){
-    printf("please input target IP address:(divided by \".\")\n");
-    char temp[20];
-    fgets(temp, 20, stdin);
-    int len = strlen(temp);
-    *targetIP = (char*)malloc((len));
-    if (!(*targetIP)) {
-        printf("Not enough memory!");
-        return 1;
-    } else {
-        for (int i = 0; i < len; i++){
-            (*targetIP)[i] = temp[i];
+void clearCharNorR(char* tarString){
+    if (tarString == NULL)
+        return;
+    for (int i = 0; i < strlen(tarString); ++i) {
+        if (tarString[i] == '\r' || tarString[i] == '\n'){
+            tarString[i] = '\0';
+            return;
         }
-        (*targetIP)[len-1] = '\0';
+    }
+}
+
+void initClient(serverManager* server){
+    char    buff[BUFFSIZE];
+    memset(buff, 0, sizeof(buff));
+
+    printf("server IP:\n");
+    while (1){
+        printf("ftp> ");
+        fgets(buff, BUFFSIZE, stdin);
+        int ip[4];
+        if ((sscanf(buff, "%d.%d.%d.%d", ip, ip+1, ip+2, ip+3)) != 4){
+            printf("IP format error!\n");
+            continue;
+        }
+        for (int i = 0; i < 4; i++){
+            if (ip[i] < 0 || ip[i] > 255) {
+                printf("IP format error!\n");
+                continue;
+            }
+        }
+
+        clearCharNorR(buff);
+        strcpy(server->serverIP, buff);
+        memset(buff, 0, sizeof(buff));
+        break;
     }
 
-    printf("please input target PORT address:\n");
-    scanf("%d", targetPORT);
+    printf("server PORT:\n");
+    while (1){
+        printf("ftp> ");
+        fgets(buff, BUFFSIZE, stdin);
+        int port;
+        sscanf(buff, "%d", &port);
+        if (port < 0 || port > 65535){
+            printf("ERROR PORT!\n");
+            continue;
+        }
+        server->serverPORT = port;
+        memset(buff, 0, sizeof(buff));
+        break;
+    }
+
+
+
+}
+
+int connectServer(serverManager* server){
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)server->serverPORT);
+
+    if ((server->cmdfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+        printf("Error socket(): %s(%d)\n", strerror(errno), errno);
+        return -1;
+    }
+
+    if (inet_pton(AF_INET, server->serverIP, &addr.sin_addr) <= 0) {
+        printf("Error inet_pton(): %s(%d)\n", strerror(errno), errno);
+        return -1;
+    }
+
+    if (connect(server->cmdfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        printf("Error connect(): %s(%d)\n", strerror(errno), errno);
+        return -1;
+    }
+
     return 0;
+}
+
+void loginServer(serverManager* server){
+    char    buff[BUFFSIZE];
+    memset(buff, 0, sizeof(buff));
+
+    printf("Login(anonymous only):\n");
+    while(1){
+        printf("ftp> ");
+        fgets(buff, BUFFSIZE, stdin);
+        if (strcmp(buff, "anonymous\n") != 0){
+            printf("User not found!\n");
+            continue;
+        } else {
+            if (HandleUSER(server) == -1){
+                printf("User not found.\n");
+                continue;
+            }
+            memset(buff, 0, sizeof(buff));
+            break;
+        }
+    }
+
+    printf("Input your password(email):\n");
+    while (1){
+        printf("ftp> ");
+        fgets(buff, BUFFSIZE, stdin);
+        clearCharNorR(buff);
+        if (strlen(buff) == 0){
+            printf("Password can not be empty!\n");
+            continue;
+        } else {
+            if(HandlePASS(server, buff) == -1){
+                printf("Password can not be empty!\n");
+                continue;
+            }
+            memset(buff, 0, sizeof(buff));
+            break;
+        }
+    }
 }
 
 void parseCmd(char* cmd, char* cmdType, char* cmdContent){
@@ -151,54 +246,125 @@ void parseCmd(char* cmd, char* cmdType, char* cmdContent){
     }
 
     for (int i = 0; i < strlen(cmdType); i++){
-        if (cmdType[i] == '\r' || cmdType[i] == '\n') {
+        if (cmdType[i] == '\r' || cmdType[i] == '\n' || cmdType == '\0') {
             cmdType[i] = '\0';
             break;
         }
     }
-    if (cmdContent != NULL){
 
+    if (cmdContent != NULL){
+        for (int i = 0; i < strlen(cmdContent); i++){
+            if (cmdContent[i] == '\r' || cmdContent[i] == '\n' || cmdContent == '\0'){
+                cmdContent[i] = '\0';
+                break;
+            }
+        }
     }
 
 }
 
-void HandlePORT(serverManager* server, char* cmdContent){
+void HandleCommand(serverManager* server){
+    char buff[BUFFSIZE];
+    memset(buff, 0, sizeof(buff));
+    while (1){
+        printf("ftp> ");
+        fgets(buff, BUFFSIZE, stdin);
+
+        char cmdType[50], *cmdContent = NULL;
+        parseCmd(buff, cmdType, cmdContent);
+
+        memset(buff, 0, sizeof(buff));
+
+        //handle command
+        if (strcmp(cmdType, "PORT") == 0){
+            HandlePORT(server, cmdContent);
+        } else if (strcmp(cmdType, "PASV") == 0){
+            HandlePASV(server, cmdContent);
+        } else if (strcmp(cmdType, "RETR") == 0){
+            HandleRETR(server, cmdContent);
+        } else if (strcmp(cmdType, "STOR") == 0){
+            HandleSTOR(server, cmdContent);
+        } else if (strcmp(cmdType, "EXIT") == 0){
+            break;
+        } else {
+            write(server->cmdfd, buff, strlen(buff));
+            read(server->cmdfd, buff, sizeof(buff));
+            printf(buff);
+        }
+    }
+}
+
+int HandleUSER(serverManager* server){
+    char userMess[100] = "USER anonymous";
+    write(server->cmdfd, userMess, strlen(userMess));
+    char response[100];
+    read(server->cmdfd, response, sizeof(response));
+    if (strstr(response, "331") != 0)
+        return -1;
+    else
+        return 0;
+}
+
+int HandlePASS(serverManager* server, char* password){
+    char passMess[100] = "PASS ";
+    strcat(passMess, password);
+    char response[100];
+    read(server->cmdfd, response, sizeof(response));
+    if (strstr(response, "230") != 0)
+        return -1;
+    else
+        return 0;
+}
+
+int HandlePORT(serverManager* server, char* cmdContent){
     int ip[4], port[2];
-    if (sscanf(cmdContent, "%d,%d,%d,%d,%d,%d", ip, ip+1, ip+2, ip+3, port, port+1) != 6)
-        return;
-    for (int i = 0; i < 4; i++){
-        if (ip[i] < 0 || ip[i] > 255)
-            return;
+    if (cmdContent == NULL){
+        char strIP[20];
+        getIP(strIP);
+        sscanf(strIP, "%d.%d.%d.%d", ip, ip+1, ip+2, ip+3);
+        strcpy(server->clientIP, strIP);
+        server->clientPORT = 20000;
+    } else {
+        sscanf(cmdContent, "%d,%d,%d,%d,%d,%d", ip, ip+1, ip+2, ip+3, port, port+1);
+        for (int i = 0; i < 4; i++){
+            if (ip[i] < 0 || ip[i] > 255)
+                return -1;
+        }
+        for (int i = 0; i < 2; i++){
+            if (port[i] < 0 || port[i] > 255)
+                return -1;
+        }
+        char strIP[50];
+        int numPORT = port[0]*256 + port[1];
+        sprintf(strIP, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+        strcpy(server->clientIP, strIP);
+        server->clientPORT = numPORT;
     }
-    for (int i = 0; i < 2; i++){
-        if (port[i] < 0 || port[i] > 255)
-            return;
-    }
-    char strIP[50];
-    int numPORT = port[0]*256 + port[1];
-    sprintf(strIP, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-    strcpy(server->clientIP, strIP);
-    server->clientPORT = numPORT;
+
+
 
     //open a socket and listen on it
     if ((server->filefd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         printf("Error socket(): %s(%d)\n", strerror(errno), errno);
-        return ;
+        return -1;
     }
     struct sockaddr_in addr;
     memset(&(addr), 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = numPORT;
-    if( bind(server->filefd, (struct sockaddr*)&(addr), sizeof(addr)) == -1){
-        printf("Error bind(): %s(%d)\n", strerror(errno), errno);
-        return ;
+    addr.sin_port = htons((uint16_t)server->clientPORT);
+    for (int i = 20000; i < 65536; i++){
+        if( bind(server->filefd, (struct sockaddr*)&(addr), sizeof(addr)) == -1){
+            addr.sin_port = htons((uint16_t)i);
+        } else {
+            break;
+        }
     }
     server->tranMode = 1;
     listen(server->filefd, 10);
 }
 
-void HandlePASV(serverManager* server, char* cmdContent, char* buff){
+void HandlePASV(serverManager* server, char* cmdContent){
     int ip[4], port[2];
     if (sscanf(buff, "227 Entering Passive Mode (%d,%d,%d,%d,%d,%d)", ip, ip+1, ip+2, ip+3, port, port+1) != 6)
         return;
@@ -290,4 +456,11 @@ void HandleSTOR(serverManager* server, char* cmdContent){
     if (server->tranMode == 1)
         close(server->filefd);
     server->tranMode = 0;
+}
+
+void getClientIPandPORT(int* ip, int *port){
+    char strIP[20];
+    getIP(strIP);
+    sscanf(strIP, "%d.%d.%d.%d");
+
 }
