@@ -59,7 +59,9 @@ int parseMessages(connection* connt, char* command){
             }
         }
     } else {
-        commandType = (char*)malloc((size_t)(space_tag+1));
+        int tmp = space_tag;
+        tmp += 1;
+        commandType = (char*)malloc((size_t)tmp);
         for (int i = 0; i < space_tag; i++){
             commandType[i] = command[i];
         }
@@ -249,9 +251,6 @@ void PORT(connection* connt, char* cmdContent){
     }
     connt->dataMode = 1;
     sendSocketMessages(connt->cmdfd, "200 PORT command successful.\r\n");
-    if (connt->dataMode != 0){
-        close(connt->datafd);
-    }
 }
 
 void PASV(connection* connt, const char* cmdContent){
@@ -347,8 +346,10 @@ void RETR(connection* connt, char* cmdContent){
     connt->datafd = datafd;
 
     //begin transmission
-    while ((nBytes = (size_t)read(file, buff, BUFFSIZE-1)) > 0){
+    while ((nBytes = (size_t)read(file, buff, BUFFSIZE-1)) >= 0){
         write(connt->datafd, buff, nBytes);
+        if (nBytes == 0)
+            break;
     }
 
     //over the transmission
@@ -381,7 +382,7 @@ void STOR(connection* connt, char* cmdContent){
     size_t nBytes;
     int datafd;
     sprintf(filename, "%s%s%s", connt->root, connt->path, cmdContent);
-    if ((file = open(filename, O_WRONLY | O_CREAT)) < 0){
+    if ((file = open(filename, O_WRONLY | O_CREAT, S_IRWXU)) < 0){
         ERROR(connt, 451);
         return;
     }
@@ -404,7 +405,7 @@ void STOR(connection* connt, char* cmdContent){
             ERROR(connt, 425);
             return ;
         }
-        sprintf(response, "50 Opening BINARY mode data connection for %s\r\n", filename);
+        sprintf(response, "150 Opening BINARY mode data connection for %s\r\n", filename);
         sendSocketMessages(connt->cmdfd, response);
     } else {    //MODE PASV
         if ((datafd = accept(connt->filefd, NULL, NULL)) == -1){
@@ -417,8 +418,10 @@ void STOR(connection* connt, char* cmdContent){
     connt->datafd = datafd;
 
     //begin transmission
-    while ((nBytes = (size_t)read(datafd, buff, BUFFSIZE-1)) > 0){
+    while ((nBytes = (size_t)read(datafd, buff, BUFFSIZE-1)) >= 0){
         write(file, buff, nBytes);
+        if (nBytes == 0)
+            break;
     }
 
     //over the transmission
@@ -499,16 +502,78 @@ void CWD(connection* connt, char* cmdContent){
 }
 
 void LIST(connection* connt, char* cmdContent){
+    if (connt->isLogIn == false){
+        ERROR(connt, 332);
+        return;
+    }
+    char command[100];
     if (cmdContent != NULL){
-        ERROR(connt, 501);
-        return;
+        sprintf(command, "ls %s", cmdContent);
+    } else {
+        strcpy(command, "ls ");
     }
-    if ((strstr(cmdContent, "..") != NULL)){
-        ERROR(connt, 501);
-        return;
+    strcat(command, " ");
+    strcat(command, connt->root);
+    strcat(command, connt->path);
+    char response[100];
+    memset(response, 0, 100);
+    if (connt->dataMode == 0){
+        strcpy(response, "Please choose transmission mode.\r\n");
+        sendSocketMessages(connt->cmdfd, response);
     }
-    char command[100] = "ls ";
 
+    int datafd;
+    if (connt->dataMode == 1){
+        sendSocketMessages(connt->cmdfd, "150 Opening BINARY mode data connection.\r\n");
+
+        if ((datafd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1){
+            ERROR(connt, 425);
+            return;
+        }
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons((uint16_t)(connt->clientIpAndPort[4]*256 + connt->clientIpAndPort[5]));
+        char clientIP[100];
+        sprintf(clientIP, "%d.%d.%d.%d", connt->clientIpAndPort[0], connt->clientIpAndPort[1],
+                connt->clientIpAndPort[2], connt->clientIpAndPort[3]);
+        inet_pton(AF_INET, clientIP, &addr.sin_addr);
+        if (connect(datafd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            ERROR(connt, 425);
+            return ;
+        }
+    } else{
+        sendSocketMessages(connt->cmdfd, "150 Opening BINARY mode data connection.\r\n");
+
+        if ((datafd = accept(connt->filefd, NULL, NULL)) == -1) {
+            ERROR(connt, 425);
+            return;
+        }
+    }
+
+    FILE* fp;
+    if ((fp = popen(command, "r")) == NULL){
+        sendSocketMessages(connt->cmdfd, "550 Failed to List.\r\n");
+        return;
+    }
+
+    char buff[BUFFSIZE];
+    while(1){
+        size_t n = fread(buff, 1, BUFFSIZE, fp);
+        if ((write(datafd, buff, n)) < 0){
+            sendSocketMessages(connt->cmdfd, "426 Failed to List.\r\n");
+            pclose(fp);
+            break;
+        }
+        if (n <= 0)
+            break;
+    }
+    pclose(fp);
+    sendSocketMessages(connt->cmdfd, "226 List successfully.\r\n");
+
+    if (connt->dataMode == 2)
+        close(connt->filefd);
+    connt->dataMode = 0;
 }
 
 void RMD(connection* connt, char* cmdContent){

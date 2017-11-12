@@ -21,7 +21,6 @@ typedef struct connection{
     int     cmdfd;
     int     filefd;
     int     datafd;
-    struct  sockaddr_in cmd_addr;
     struct  sockaddr_in data_addr;
     bool    isLogIn;
     bool    isPassed;

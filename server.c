@@ -7,7 +7,7 @@ int main(int argc, char **argv){
     char sentence[BUFFSIZE];
     int p;
     int len;
-    int listen_port = 6789;
+    int listen_port = 6788;
     char working_dir[100] = default_root;
     parse_input(argc, argv, &listen_port, working_dir);
 
@@ -49,7 +49,7 @@ int main(int argc, char **argv){
         if (pid < 0){
             printf("Error fork()\n");
         } else if (pid == 0){
-            //send initial message to client
+           //send initial message to client
             sendSocketMessages(connt.cmdfd, "220 Anonymous FTP server ready.\r\n");
             //loop to handle user's command
             while(1){
@@ -57,8 +57,8 @@ int main(int argc, char **argv){
                 if (parseMessages(&connt, sentence) == -1)
                     break;
             }
-            close(connt.cmdfd);
-            break;
+        close(connt.cmdfd);
+        break;
         }
     }
 

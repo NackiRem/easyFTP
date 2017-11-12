@@ -1,0 +1,37 @@
+import subprocess
+import random
+import time
+import filecmp
+import struct
+import os
+import shutil
+import string
+from ftplib import FTP
+
+credit = 40
+minor = 3
+major = 8
+
+def create_test_file(filename):
+  f = open(filename, 'wb')
+  for i in xrange(10000):
+    data = struct.pack('d', random.random())
+    f.write(data)
+  f.close()
+
+port=6789
+directory="/tmp"
+
+ftp = FTP()
+
+ftp.connect('127.0.0.1', port).startswith('220')
+
+ftp.login().startswith('230')
+ftp.sendcmd('SYST') != '215 UNIX Type: L8'
+ftp.sendcmd('TYPE I') != '200 Type set to I.'
+
+filename = 'test%d.data' % random.randint(100, 200)
+create_test_file(filename)
+ftp.storbinary('STOR %s' % filename, open(filename, 'rb')).startswith('226')
+filecmp.cmp(filename, directory + '/' + filename)
+
